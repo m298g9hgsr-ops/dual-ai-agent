@@ -37,13 +37,25 @@ class AgentTeam:
     ) -> "AgentTeam":
         return cls(
             architect=ArchitectAgent(
-                architect_client or build_client(architect_provider or os.getenv("ARCHITECT_PROVIDER"))
+                architect_client
+                or build_client(
+                    architect_provider or os.getenv("ARCHITECT_PROVIDER"),
+                    model=os.getenv("ARCHITECT_MODEL"),
+                )
             ),
             engineer=EngineerAgent(
-                engineer_client or build_client(engineer_provider or os.getenv("ENGINEER_PROVIDER"))
+                engineer_client
+                or build_client(
+                    engineer_provider or os.getenv("ENGINEER_PROVIDER"),
+                    model=os.getenv("ENGINEER_MODEL"),
+                )
             ),
             reviewer=ReviewerAgent(
-                reviewer_client or build_client(reviewer_provider or os.getenv("REVIEWER_PROVIDER"))
+                reviewer_client
+                or build_client(
+                    reviewer_provider or os.getenv("REVIEWER_PROVIDER"),
+                    model=os.getenv("REVIEWER_MODEL"),
+                )
             ),
         )
 

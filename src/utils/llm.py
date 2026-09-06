@@ -1,18 +1,20 @@
-"""LLM chat client supporting multiple providers (OpenAI & Anthropic).
+"""LLM chat client supporting multiple providers (OpenAI, Anthropic & Ollama).
 
 The "dual-AI" aspect: each agent can be wired to a different provider/model,
-so the architect could run on Anthropic while the engineer runs on OpenAI, or
+so the architect could run on Anthropic while the engineer runs on Ollama, or
 vice versa.
 
 Environment variables used:
 
-- LLM_PROVIDER            default provider, "openai" or "anthropic"
+- LLM_PROVIDER            default provider: "openai", "anthropic" or "ollama"
 - OPENAI_API_KEY          OpenAI key
 - OPENAI_BASE_URL         defaults to https://api.openai.com/v1
 - OPENAI_MODEL            defaults to gpt-4o-mini
 - ANTHROPIC_API_KEY       Anthropic key
 - ANTHROPIC_BASE_URL      defaults to https://api.anthropic.com
 - ANTHROPIC_MODEL         defaults to claude-sonnet-4-20250514
+- OLLAMA_BASE_URL         defaults to http://localhost:11434/v1
+- OLLAMA_MODEL            defaults to qwen2.5:7b
 """
 
 from __future__ import annotations
@@ -23,9 +25,14 @@ import time
 from dataclasses import dataclass, field
 
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
+DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
 
 
 class LLMError(RuntimeError):
@@ -68,13 +75,20 @@ class OpenAICompatibleClient(BaseLLMClient):
         base_url: str | None = None,
         model: str | None = None,
         timeout: float = 300.0,
+        provider_label: str | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise LLMError("OPENAI_API_KEY is not set.")
         self.base_url = (base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
         self.model = model or os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
         self.timeout = timeout
+        if provider_label:
+            self.provider = provider_label
+        if not self.api_key and not self._is_local():
+            raise LLMError("OPENAI_API_KEY is not set (only skipped for local endpoints).")
+
+    def _is_local(self) -> bool:
+        host = self.base_url.split("://", 1)[-1].split("/", 1)[0].lower()
+        return host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local")
 
     def complete(
         self,
@@ -93,10 +107,9 @@ class OpenAICompatibleClient(BaseLLMClient):
                 for m in messages
             ],
         }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(
@@ -197,13 +210,20 @@ def build_client(
     base_url: str | None = None,
     model: str | None = None,
 ) -> BaseLLMClient:
-    """Create a client for the given provider ("openai" | "anthropic")."""
+    """Create a client for the given provider ("openai" | "anthropic" | "ollama")."""
     provider = (provider or os.getenv("LLM_PROVIDER", "openai")).lower()
     if provider == "openai":
         return OpenAICompatibleClient(api_key, base_url, model)
     if provider == "anthropic":
         return AnthropicClient(api_key, base_url, model)
-    raise LLMError(f"Unknown provider: {provider!r} (use 'openai' or 'anthropic')")
+    if provider == "ollama":
+        return OpenAICompatibleClient(
+            api_key="local",  # Ollama needs no key; harmless if echoed nowhere
+            base_url=base_url or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
+            model=model or os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
+            provider_label="ollama",
+        )
+    raise LLMError(f"Unknown provider: {provider!r} (use 'openai', 'anthropic' or 'ollama')")
 
 
 def json_from_llm(text: str) -> dict:
