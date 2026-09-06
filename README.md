@@ -37,6 +37,11 @@ python -m src.cli "Build a todo REST API with FastAPI and SQLite" \
 
 # Dual-AI pairing: Architect + Reviewer on Anthropic, Engineer on OpenAI
 python -m src.cli "..." --architect anthropic --engineer openai --reviewer anthropic --show-code
+
+# Ollama (local, no API key needed): write the generated code to ./out/
+python -m src.cli "Build a todo REST API with FastAPI and SQLite" \
+    --requirement "CRUD endpoints" --output ./out
+# -> ./out/<generated files> + ./out/report.json (design + review report)
 ```
 
 ### Web API

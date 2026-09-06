@@ -13,7 +13,7 @@ placeholders or "…". Always reply with a single JSON object only.
 JSON schema:
 {
   "overview": string,
-  "files": [{"path": "./relative/path.py", "content": "full file text"}],
+  "files": [{"path": "src/main.py", "content": "full file text"}],
   "run_instructions": [string, ...]
 }
 """
