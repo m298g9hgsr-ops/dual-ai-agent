@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from .models import Task
-from .pipeline import AgentTeam
+from .pipeline import AgentTeam, SparTeam
 from .utils.llm import build_client
 
 
@@ -75,7 +75,79 @@ def write_output(root: Path, result) -> int:
     return written
 
 
+def spar_main(argv: list[str]) -> int:
+    """Red/blue adversarial exercise: RED attacks, BLUE defends, JUDGE scores."""
+    p = argparse.ArgumentParser(prog="dual-ai-agent spar")
+    p.add_argument("--target", required=True, help="Authorized lab target URL (localhost by default).")
+    p.add_argument("--executor", default="local", help="local | wsl[:distro[:user]] | docker:<container>")
+    p.add_argument("--rounds", type=int, default=1)
+    p.add_argument("--max-steps", type=int, default=5)
+    p.add_argument("--objective", action="append", default=[], help="Attack objective (repeatable).")
+    p.add_argument("--timeout", type=int, default=120)
+    p.add_argument("--output", default=None, help="Write spar.json + report.md here.")
+    args = p.parse_args(argv)
+
+    team = SparTeam.from_providers(executor=args.executor, timeout=args.timeout)
+    result = team.run(
+        args.target,
+        objectives=args.objective or None,
+        rounds=args.rounds,
+        max_steps=args.max_steps,
+    )
+
+    print(f"\n=== SPAR · {result.target} ===")
+    print(f"步驟 {len(result.plan.steps)} · 執行 {len(result.attack.commands_run)} 條指令")
+    print(f"\n[RED] 發現 {len(result.attack.findings)} 個:")
+    for f in result.attack.findings:
+        print(f"  - [{f.severity.upper()}] {f.title}")
+        if f.evidence:
+            print(f"      證據: {f.evidence[:120]}")
+    print(f"\n[BLUE] 防禦動作 {len(result.defense.actions)} 項:")
+    for a in result.defense.actions:
+        print(f"  - ({a.priority}) {a.area}: {a.action}")
+    print(f"\n[JUDGE] {result.verdict.verdict} — 總分 {result.verdict.score} "
+          f"(攻 {result.verdict.attacker_score} / 防 {result.verdict.defender_score})")
+    print(f"  {result.verdict.commentary}")
+
+    if args.output:
+        root = Path(args.output).resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "spar.json").write_text(
+            json.dumps(result.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        md = [
+            f"# SPAR 對抗報告 · {result.target}",
+            "",
+            f"- 回合數: {result.rounds} · 執行環境: {result.meta.get('executor')}",
+            f"- 裁判: **{result.verdict.verdict}** · 總分 {result.verdict.score}"
+            f"（攻擊 {result.verdict.attacker_score} / 防禦 {result.verdict.defender_score}）",
+            "",
+            "## RED — 攻擊發現",
+        ]
+        for f in result.attack.findings:
+            md.append(f"### [{f.severity.upper()}] {f.title}")
+            if f.impact:
+                md.append(f"- 影響: {f.impact}")
+            if f.evidence:
+                md.append(f"- 證據:\n\n```\n{f.evidence[:600]}\n```")
+        md.append("\n## BLUE — 防禦計畫")
+        for a in result.defense.actions:
+            md.append(f"- **({a.priority}) {a.area}** — {a.action} {('· 修：' + ', '.join(a.addresses)) if a.addresses else ''}")
+        if result.defense.residual_risk:
+            md.append("\n### 殘餘風險")
+            md += [f"- {r}" for r in result.defense.residual_risk]
+        md.append("\n## 執行過的指令")
+        md += [f"- `{c}`" for c in result.attack.commands_run]
+        (root / "report.md").write_text("\n".join(md), encoding="utf-8")
+        print(f"\n[written] {root / 'spar.json'}")
+        print(f"[written] {root / 'report.md'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "spar":
+        return spar_main(argv[1:])
     parser = argparse.ArgumentParser(
         prog="dual-ai-agent",
         description="Run the architect -> engineer -> reviewer pipeline.",

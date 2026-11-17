@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -81,6 +82,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         self.base_url = (base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
         self.model = model or os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
         self.timeout = timeout
+        self._last_request = 0.0  # rate pacing anchor (see complete())
         if provider_label:
             self.provider = provider_label
         if not self.api_key and not self._is_local():
@@ -110,24 +112,67 @@ class OpenAICompatibleClient(BaseLLMClient):
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
+        data: dict | None = None
+        attempts = 4
+        last_status_error: str = ""
+        for attempt in range(attempts):
+            # Rate pacing: keep a minimum interval between requests so a burst of
+            # agent calls does not trip the provider's rate limiter.
+            interval = float(os.getenv("LLM_REQUEST_INTERVAL", "0") or 0)
+            now = time.monotonic()
+            wait = self._last_request + interval - now
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request = time.monotonic()
+            # Slow gateways (NVIDIA NIM) can take minutes for the first token:
+            # grow the per-attempt timeout instead of failing the whole run.
+            timeout = self.timeout * (1 + attempt)
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    resp = client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
                 resp.raise_for_status()
                 data = resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise LLMError(
-                f"OpenAI API error {exc.response.status_code}: {exc.response.text[:500]}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"OpenAI request failed: {exc}") from exc
+                break
+            except httpx.ReadTimeout as exc:
+                if attempt == attempts - 1:
+                    raise LLMError(
+                        f"OpenAI request timed out after {int(timeout)}s "
+                        f"(model={self.model})."
+                    ) from exc
+            except httpx.HTTPStatusError as exc:
+                # 429 / 5xx: back off (honour Retry-After) and try again instead
+                # of failing the whole agent run.
+                if exc.response.status_code in (429, 500, 502, 503, 504) and attempt < attempts - 1:
+                    retry_after = exc.response.headers.get("Retry-After")
+                    delay = float(retry_after) if (retry_after or "").replace(".", "", 1).isdigit() else 20.0 * (attempt + 1)
+                    time.sleep(min(delay, 120))
+                    continue
+                raise LLMError(
+                    f"OpenAI API error {exc.response.status_code}: {exc.response.text[:500]}"
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise LLMError(f"OpenAI request failed: {exc}") from exc
+        assert data is not None, last_status_error
 
         choice = data["choices"][0]
-        text = choice["message"]["content"] or ""
+        message = choice["message"] or {}
+        content = message.get("content")
+        if isinstance(content, list):  # some gateways return content parts
+            content = "".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+        # Reasoning models (glm-5.x, nemotron reasoning, ...) may leave `content`
+        # empty and put the answer in `reasoning_content`.
+        text = (content or "") or (message.get("reasoning_content") or "")
+        if not text.strip():
+            raise LLMError(
+                "Model returned no text content "
+                f"(message keys: {sorted(message.keys())})."
+            )
         return LLMResult(
             text=text,
             model=data.get("model", self.model),
@@ -226,8 +271,32 @@ def build_client(
     raise LLMError(f"Unknown provider: {provider!r} (use 'openai', 'anthropic' or 'ollama')")
 
 
+def _repair_json(text: str) -> dict | None:
+    """Best-effort repair for near-JSON output (single quotes, trailing commas)."""
+    import ast
+
+    cleaned = text.strip()
+    # strip trailing commas:  {"a": 1,}
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    try:
+        data = ast.literal_eval(cleaned)
+        if isinstance(data, dict):
+            return data
+    except (ValueError, SyntaxError):
+        pass
+    # single-quoted keys/values → double quotes (only when it parses afterwards)
+    swapped = re.sub(r"(?<![\w\\])'([^'\\\n]*(?:\\.[^'\\\n]*)*)'(?=\s*[:,}\]])", r'"\1"', cleaned)
+    try:
+        data = json.loads(swapped)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
 def json_from_llm(text: str) -> dict:
-    """Best-effort parse of JSON from an LLM response (strips fences)."""
+    """Best-effort parse of JSON from an LLM response (strips fences, repairs quotes)."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
@@ -243,4 +312,7 @@ def json_from_llm(text: str) -> dict:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
+        repaired = _repair_json(cleaned)
+        if repaired is not None:
+            return repaired
         raise LLMError(f"Could not parse JSON from model output: {exc}") from exc

@@ -41,6 +41,30 @@ class BaseAgent:
                 return fallback
             raise ValueError(f"{model_cls.__name__} parse failed: {exc}") from exc
 
+    def parse_with_retry(
+        self,
+        model_cls: type[T],
+        text: str,
+        *,
+        attempts: int = 2,
+        hint: str = "Reply with a single valid JSON object and nothing else.",
+    ) -> T:
+        """Parse typed output; on failure, re-ask the model with a stricter hint."""
+        last_exc: Exception | None = None
+        current = text
+        for attempt in range(max(1, attempts)):
+            try:
+                return self.parse_model(model_cls, current)
+            except Exception as exc:  # noqa: BLE001 - re-ask on any parse problem
+                last_exc = exc
+                if attempt == max(1, attempts) - 1:
+                    break
+                current = self.prompt(
+                    f"{hint}\n\nYour previous output was:\n{current[:3000]}",
+                    temperature=0.0,
+                )
+        raise ValueError(f"{model_cls.__name__} parse failed after retries: {last_exc}")
+
     def describe(self) -> dict[str, str]:
         return {
             "name": self.name,

@@ -1,0 +1,47 @@
+services:
+  # RED — the attacker container. Holds the offensive tooling the RED agent drives.
+  red:
+    image: kalilinux/kali-rolling:latest
+    container_name: dual-ai-red
+    command: ["sleep", "infinity"]
+    working_dir: /work
+    volumes:
+      - ./:/work
+    environment:
+      SPAR_ALLOWED_TARGETS: "${SPAR_ALLOWED_TARGETS:-127.0.0.1,localhost}"
+    # raw sockets / packet crafting need these; drop them for pure web testing
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # install tooling once:
+    #   docker compose exec red bash -lc "apt-get update && apt-get install -y nmap curl nikto gobuster sqlmap"
+
+  # BLUE — the defender container. Runs the same agent code, but its job is to turn
+  # RED's findings into a remediation plan and to verify the fixes later.
+  blue:
+    image: python:3.12-slim
+    container_name: dual-ai-blue
+    command: ["sleep", "infinity"]
+    working_dir: /work
+    volumes:
+      - ./:/work
+    environment:
+      SPAR_ALLOWED_TARGETS: "${SPAR_ALLOWED_TARGETS:-127.0.0.1,localhost}"
+      LLM_PROVIDER: "${LLM_PROVIDER:-openai}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-mini}"
+      ATTACKER_MODEL: "${ATTACKER_MODEL:-}"
+      DEFENDER_MODEL: "${DEFENDER_MODEL:-}"
+      JUDGE_MODEL: "${JUDGE_MODEL:-}"
+    depends_on:
+      - red
+
+  # Optional practice target (OWASP Juice Shop) on the shared network.
+  #   docker compose up target
+  target:
+    image: bkimminich/juice-shop
+    container_name: dual-ai-target
+    ports:
+      - "3000:3000"
+    profiles: ["target"]
