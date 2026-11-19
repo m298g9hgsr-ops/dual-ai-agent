@@ -147,6 +147,13 @@ class OpenAICompatibleClient(BaseLLMClient):
                 # 429 / 5xx: back off (honour Retry-After) and try again instead
                 # of failing the whole agent run.
                 if exc.response.status_code in (429, 500, 502, 503, 504) and attempt < attempts - 1:
+                    # Model-level fallback: the requested model can be too slow for
+                    # the gateway (NVIDIA NIM returns 504 on long prompts) -> switch once.
+                    fb = os.getenv("LLM_FALLBACK_MODEL", "").strip()
+                    if fb and fb != self.model and exc.response.status_code in (502, 503, 504):
+                        print(f"[llm] {self.model} -> fallback {fb} ({exc.response.status_code})")
+                        self.model = fb
+                        payload["model"] = fb
                     retry_after = exc.response.headers.get("Retry-After")
                     delay = float(retry_after) if (retry_after or "").replace(".", "", 1).isdigit() else 20.0 * (attempt + 1)
                     time.sleep(min(delay, 120))

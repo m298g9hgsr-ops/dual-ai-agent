@@ -16,6 +16,7 @@ from .agents.engineer import EngineerAgent
 from .agents.judge import JudgeAgent
 from .agents.reviewer import ReviewerAgent
 from .models import DesignDoc, PipelineResult, SparResult, Task
+from .models.spar import AttackReport
 from .tools.executor import CommandExecutor, build_executor
 from .utils.llm import BaseLLMClient, build_client
 
@@ -153,12 +154,35 @@ class SparTeam:
         attack = None
         defense = None
         verdict = None
-        for _ in range(max(1, rounds)):
+        # Accumulate across rounds: earlier rounds used to overwrite each other,
+        # so only the last round's findings survived.
+        all_findings: list = []
+        all_commands: list[str] = []
+        round_summaries: list[str] = []
+        for rnd in range(max(1, rounds)):
             plan = self.attacker.plan(target, objectives, max_steps=max_steps)
             results = [self.executor.run(step.command, target) for step in plan.steps]
-            attack = self.attacker.report(plan, results)
-            defense = self.defender.defend(attack)
-            verdict = self.judge.score(attack, defense)
+            attack_r = self.attacker.report(plan, results)
+            round_summaries.append(attack_r.summary)
+            for cmd in attack_r.commands_run:
+                if cmd not in all_commands:
+                    all_commands.append(cmd)
+            for f in attack_r.findings:
+                dup = any(
+                    f.title == seen.title and f.evidence[:120] == seen.evidence[:120]
+                    for seen in all_findings
+                )
+                if not dup:
+                    all_findings.append(f)
+        attack = AttackReport(
+            target=target,
+            summary=" ".join(s for s in round_summaries if s),
+            findings=all_findings,
+            commands_run=all_commands,
+        )
+        # Defence and judging see the FULL picture, not just the last round.
+        defense = self.defender.defend(attack)
+        verdict = self.judge.score(attack, defense)
         assert plan and attack and defense and verdict
         meta = {
             self.attacker.name: self.attacker.describe(),
