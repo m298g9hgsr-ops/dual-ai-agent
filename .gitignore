@@ -27,3 +27,6 @@ Thumbs.db
 # Tooling
 *.log
 out/
+
+# container worker scratch
+.aider.*

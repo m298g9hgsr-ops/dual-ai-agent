@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPAR 紅藍攻防 · 3D 展示模型</title>
+<style>
+  :root{--cyan:#00F0FF;--blue:#4D7CFF;--red:#FF4D6A;--txt:#EAF2FF;--dim:#8A96AD;
+    --grad:linear-gradient(135deg,var(--cyan),var(--blue))}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:#04060c;font-family:"Segoe UI","Microsoft JhengHei",system-ui,sans-serif}
+  #cv{position:fixed;inset:0;display:block}
+  .ui{position:fixed;z-index:5;pointer-events:none}
+  .title{top:26px;left:32px}
+  .title .k{font-size:11px;letter-spacing:.34em;color:var(--dim)}
+  .title h1{font-size:clamp(20px,2.6vw,30px);font-weight:800;letter-spacing:.05em;margin-top:4px;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 16px rgba(0,240,255,.4))}
+  .score{top:26px;right:32px;text-align:right}
+  .score .g{font-size:12px;letter-spacing:.22em;color:var(--dim)}
+  .score b{font-size:44px;font-weight:800;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 14px rgba(0,240,255,.45))}
+  .score .s{font-size:12px;color:var(--dim);margin-top:2px}
+  .score .s i{font-style:normal;color:var(--txt)}
+  .read{left:32px;bottom:30px;max-width:430px;border-radius:22px;padding:18px 22px;
+    border:1px solid rgba(255,255,255,.1);background:rgba(8,12,24,.72);backdrop-filter:blur(10px);
+    box-shadow:0 18px 50px -18px rgba(0,240,255,.25)}
+  .read .t{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700}
+  .read .dot{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px var(--cyan);animation:pl 2s infinite}
+  @keyframes pl{50%{opacity:.35}}
+  .read .sev{font-size:10.5px;padding:2px 9px;border-radius:99px;border:1px solid rgba(255,209,102,.45);color:#FFD166;letter-spacing:.12em}
+  .read p{margin-top:8px;font-size:13.5px;color:var(--dim);line-height:1.75}
+  .read p b{color:var(--cyan);font-weight:600}
+  .hint{right:32px;bottom:30px;font-size:12px;color:var(--dim);text-align:right;line-height:1.9;letter-spacing:.08em}
+  .hint b{color:var(--txt);font-weight:600}
+  .badge{position:fixed;z-index:6;top:88px;left:32px;display:flex;gap:8px}
+  .badge .b{pointer-events:auto;cursor:pointer;padding:6px 13px;border-radius:99px;font-size:12px;
+    border:1px solid rgba(255,255,255,.12);background:rgba(8,12,24,.6);color:var(--dim);transition:.25s;user-select:none}
+  .badge .b:hover{color:var(--txt);border-color:rgba(0,240,255,.4)}
+  .badge .b.on{color:#000;background:var(--grad);border-color:transparent;font-weight:700;box-shadow:0 0 16px rgba(0,240,255,.5)}
+  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);
+    letter-spacing:.3em;font-size:13px;z-index:1}
+</style>
+</head>
+<body>
+<div class="loading" id="ld">LOADING 3D …</div>
+<canvas id="cv"></canvas>
+<div class="ui title"><div class="k">SPAR · RED / BLUE / JUDGE</div><h1>紅藍攻防 · 展示模型</h1></div>
+<div class="ui score"><div class="g">JUDGE 總分</div><b>83</b><div class="s">攻擊 <i>75</i> · 防禦 <i>92</i> · <i>strong-defense</i></div></div>
+<div class="badge" id="badges"></div>
+<div class="ui read"><div class="t"><span class="dot"></span><span id="rt">發現 1/4：服務指紋</span><span class="sev" id="rs">INFO</span></div>
+<p id="rp">BLUE 對應修補 → <b>p1 · 埠限縮：3000 改綁 loopback ＋ 白名單用戶端</b></p></div>
+<div class="ui hint"><b>拖曳</b> 旋轉模型 · <b>滾輪</b> 縮放<br>點孔位發射探測 · ← → 切換發現</div>
+
+<script type="importmap">
+{"imports":{"three":"./vendor/three.module.js",
+"three/addons/":"./vendor/"}}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/OrbitControls.js";
+import { RoundedBoxGeometry } from "three/addons/RoundedBoxGeometry.js";
+
+const CYAN=0x00f0ff, BLUE=0x4d7cff, RED=0xff4d6a, GOLD=0xffd166;
+const DATA=[
+ {n:"服務指紋",sev:"INFO",fx:"p1 · 埠限縮：3000 改綁 loopback ＋ 白名單用戶端"},
+ {n:"萬用 CORS",sev:"LOW",fx:"p1 · CORS 白名單：移除 Access-Control-Allow-Origin:*"},
+ {n:"缺 CSP",sev:"LOW",fx:"p1 · 部署 Content-Security-Policy 回應標頭"},
+ {n:"/ftp 目錄曝險",sev:"INFO",fx:"p2 · 關閉 /ftp 目錄列舉 ＋ FTP 存取控制"},
+];
+
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x04060c,38,90);
+const cam=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,0.1,200);
+cam.position.set(-16,11,20);
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById("cv"),antialias:true,alpha:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+
+scene.add(new THREE.AmbientLight(0x8899bb,0.5));
+const key=new THREE.PointLight(CYAN,140,80);key.position.set(14,18,10);scene.add(key);
+const fill=new THREE.PointLight(RED,60,60);fill.position.set(-18,8,-6);scene.add(fill);
+const rim=new THREE.PointLight(BLUE,80,70);rim.position.set(0,10,-18);scene.add(rim);
+
+/* --- display base --- */
+const base=new THREE.Group();scene.add(base);
+const slab=new THREE.Mesh(new RoundedBoxGeometry(36,2.2,24,4,1.1),
+  new THREE.MeshStandardMaterial({color:0x0a1020,roughness:0.35,metalness:0.6}));
+slab.position.y=-1.1;base.add(slab);
+const rimLine=new THREE.LineSegments(
+  new THREE.EdgesGeometry(new RoundedBoxGeometry(36.4,0.5,24.4,2,0.24)),
+  new THREE.LineBasicMaterial({color:CYAN,transparent:true,opacity:0.55}));
+rimLine.position.y=0.12;base.add(rimLine);
+
+const mat=(c,e=0,ei=1)=>new THREE.MeshStandardMaterial({color:c,roughness:0.3,metalness:0.5,
+  emissive:e,emissiveIntensity:ei});
+const bodyMat=mat(0x101830); bodyMat.transparent=true; bodyMat.opacity=0.96;
+
+/* --- RED turret (left) --- */
+const red=new THREE.Group();red.position.set(-12.5,0,0);base.add(red);
+const rBase=new THREE.Mesh(new THREE.CylinderGeometry(2.1,2.5,1.4,40),mat(0x1a1020,RED,0.25));
+rBase.position.y=0.7;red.add(rBase);
+const rDome=new THREE.Mesh(new THREE.SphereGeometry(1.5,32,20),mat(0x241024,RED,0.35));
+rDome.position.y=1.9;red.add(rDome);
+const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.5,5.4,24),mat(0x2a1226,RED,0.3));
+barrel.rotation.z=Math.PI/2;barrel.position.set(2.6,3.1,0);red.add(barrel);
+const muzzle=new THREE.Mesh(new THREE.TorusGeometry(0.52,0.14,12,28),mat(0x000000,RED,1.6));
+muzzle.rotation.y=Math.PI/2;muzzle.position.set(5.3,3.1,0);red.add(muzzle);
+const rStripe=new THREE.Mesh(new THREE.TorusGeometry(2.14,0.06,10,48),mat(0,RED,1.4));
+rStripe.rotation.x=Math.PI/2;rStripe.position.y=1.35;red.add(rStripe);
+
+/* --- Juice Shop target (right) --- */
+const shop=new THREE.Group();shop.position.set(10.5,0,0);base.add(shop);
+const body=new THREE.Mesh(new RoundedBoxGeometry(7,8,7,4,0.8),bodyMat);
+body.position.y=4;shop.add(body);
+const awn=new THREE.Mesh(new RoundedBoxGeometry(1.6,0.5,7.8,2,0.22),mat(0x0c2c38,CYAN,0.5));
+awn.position.set(-4.1,5.2,0);shop.add(awn);
+const sign=new THREE.Mesh(new RoundedBoxGeometry(0.4,1.9,4.6,2,0.15),mat(0x08203a,BLUE,0.55));
+sign.position.set(-3.9,7.4,0);shop.add(sign);
+const logoLine=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.16,3.6),
+  new THREE.MeshBasicMaterial({color:CYAN}));
+logoLine.position.set(-4.12,7.4,0);shop.add(logoLine);
+const edge=new THREE.LineSegments(new THREE.EdgesGeometry(body.geometry),
+  new THREE.LineBasicMaterial({color:CYAN,transparent:true,opacity:0.35}));
+edge.position.y=4;shop.add(edge);
+const HOLE_POS=[[-3.52,4.6,-1.9],[-3.52,3.1,-0.4],[-3.52,4.9,1.3],[-3.52,2.7,2.4]];
+const holes=HOLE_POS.map(p=>{
+  const h=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,0.24,24),mat(0x1c0a12,RED,0.35));
+  h.rotation.z=Math.PI/2;h.position.set(...p);shop.add(h);return h;
+});
+
+/* --- BLUE wall (middle) --- */
+const wall=new THREE.Group();wall.position.set(-0.5,0,0);base.add(wall);
+const wSlab=new THREE.Mesh(new RoundedBoxGeometry(0.9,6.2,11.5,3,0.35),mat(0x0a1a2e,BLUE,0.22));
+wSlab.position.y=3.1;wall.add(wSlab);
+const wEdge=new THREE.LineSegments(new THREE.EdgesGeometry(wSlab.geometry),
+  new THREE.LineBasicMaterial({color:CYAN,transparent:true,opacity:0.4}));
+wEdge.position.y=3.1;wall.add(wEdge);
+const PATCH_POS=[[-0.9,4.6,-3.4],[-0.9,5.2,-1.2],[-0.9,4.4,0.9],[-0.9,3.4,2.9],[-0.9,5.4,2.3]];
+const patches=PATCH_POS.map(p=>{
+  const m=new THREE.Mesh(new RoundedBoxGeometry(0.5,1.25,1.7,2,0.14),mat(0x06202e,CYAN,0.7));
+  m.position.set(...p);wall.add(m);return m;
+});
+
+/* --- JUDGE ring (back) --- */
+const judge=new THREE.Group();judge.position.set(4,0,-8.5);base.add(judge);
+const jPost=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.7,6.5,24),mat(0x101830));
+jPost.position.y=3.25;judge.add(jPost);
+const track=new THREE.Mesh(new THREE.TorusGeometry(2.5,0.16,14,60),
+  mat(0x101830,0x223055,0.4));judge.add(track);track.position.y=8;
+const arc=new THREE.Mesh(new THREE.TorusGeometry(2.5,0.16,14,60,Math.PI*2*0.83),
+  mat(0,CYAN,1.8));arc.position.y=8;arc.rotation.z=Math.PI/2;judge.add(arc);
+const needle=new THREE.Mesh(new THREE.BoxGeometry(0.1,2.1,0.1),mat(0,GOLD,1.6));
+needle.geometry.translate(0,0.95,0);needle.position.y=8;needle.rotation.z=Math.PI*0.86;judge.add(needle);
+const jCap=new THREE.Mesh(new THREE.SphereGeometry(0.3,16,12),mat(0,GOLD,1.2));jCap.position.y=8;judge.add(jCap);
+const jBase=new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.8,0.8,32),mat(0x0c1428,BLUE,0.3));
+jBase.position.y=0.4;judge.add(jBase);
+
+/* --- probe dart --- */
+const dart=new THREE.Mesh(new THREE.CapsuleGeometry(0.16,0.6,6,14),mat(0,RED,2.2));
+dart.rotation.z=Math.PI/2;dart.visible=false;base.add(dart);
+const Muzzle=new THREE.Vector3(-7.2,3.1,0);
+
+/* --- dust --- */
+const dots=(()=>{const g=new THREE.BufferGeometry(),n=90,arr=new Float32Array(n*3);
+for(let i=0;i<n*3;i++)arr[i]=(Math.random()-0.5)*44;
+g.setAttribute("position",new THREE.BufferAttribute(arr,3));
+return new THREE.Points(g,new THREE.PointsMaterial({color:0x3355aa,size:0.07,transparent:true,opacity:0.6}));})();
+scene.add(dots);
+
+/* --- controls --- */
+const ctl=new OrbitControls(cam,renderer.domElement);
+ctl.enableDamping=true;ctl.dampingFactor=0.06;ctl.minDistance=10;ctl.maxDistance=46;
+ctl.maxPolarAngle=Math.PI*0.55;ctl.target.set(0,3.4,0);
+ctl.autoRotate=true;ctl.autoRotateSpeed=0.9;
+let idleT=0;
+ctl.addEventListener("start",()=>{ctl.autoRotate=false;clearTimeout(idleT);
+  idleT=setTimeout(()=>ctl.autoRotate=true,7000);});
+
+/* --- interaction --- */
+let cur=-1,fly=null;
+const ray=new THREE.Raycaster(),ptr=new THREE.Vector2();
+const rt=document.getElementById("rt"),rs=document.getElementById("rs"),rp=document.getElementById("rp");
+const badges=document.getElementById("badges");
+DATA.forEach((d,i)=>{const b=document.createElement("div");b.className="b";b.textContent=`發現 ${i+1}`;
+  b.onclick=()=>select(i);badges.appendChild(b);});
+function select(i){
+  if(i===cur)return;cur=i;
+  document.querySelectorAll(".badge .b").forEach((b,j)=>b.classList.toggle("on",j===i));
+  const d=DATA[i];
+  rt.textContent=`發現 ${i+1}/4：${d.n}`;rs.textContent=d.sev;
+  rp.innerHTML=`BLUE 對應修補 → <b>${d.fx}</b>`;
+  holes.forEach((h,j)=>h.material.emissiveIntensity=j===i?1.8:0.35);
+  patches.forEach((p,j)=>{
+    const on=(j===i)||(i===3&&j===4);
+    p.position.x=on?-1.35:-0.9;
+    p.material.emissiveIntensity=on?1.5:0.7;
+  });
+  needle.rotation.z=Math.PI*(0.86+0.07*(i/(DATA.length-1)));
+  fly={t:0,from:Muzzle.clone(),to:new THREE.Vector3(...HOLE_POS[i]).add(shop.position)};
+  dart.visible=true;
+}
+renderer.domElement.addEventListener("pointerdown",e=>{
+  ptr.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(ptr,cam);
+  const hit=ray.intersectObjects(holes,false)[0];
+  if(hit)select(holes.indexOf(hit.object));
+});
+addEventListener("keydown",e=>{
+  if(e.key==="ArrowRight")select((cur+1)%DATA.length);
+  if(e.key==="ArrowLeft")select((cur+DATA.length-1)%DATA.length);
+});
+let tour=0,paused=false;
+addEventListener("pointerdown",()=>{paused=true;clearTimeout(tour);tour=setTimeout(()=>paused=false,8000);},{once:false});
+
+/* --- loop --- */
+const clock=new THREE.Clock();
+function tick(){
+  const dt=clock.getDelta(),t=clock.elapsedTime;
+  ctl.update();
+  if(!paused){tour+=dt*0.32;}
+  if(cur<0&&t>1.6)select(0);
+  if(!paused&&((t%4)<dt)){select((cur+1)%DATA.length);}
+  if(fly){
+    fly.t+=dt*1.4;
+    const k=Math.min(fly.t,1);
+    dart.position.lerpVectors(fly.from,fly.to,k);
+    dart.position.y+=Math.sin(k*Math.PI)*1.6;
+    if(k>=1){fly=null;dart.visible=false;
+      const h=holes[cur];h.material.emissiveIntensity=2.6;
+      setTimeout(()=>{if(holes[cur]===h)h.material.emissiveIntensity=1.8;},260);}
+  }
+  dots.rotation.y=t*0.02;
+  rStripe.material.emissiveIntensity=1.2+Math.sin(t*3)*0.5;
+  arc.material.emissiveIntensity=1.5+Math.sin(t*2)*0.35;
+  rimLine.material.opacity=0.4+Math.sin(t*2)*0.15;
+  renderer.render(scene,cam);
+  requestAnimationFrame(tick);
+}
+addEventListener("resize",()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);});
+renderer.render(scene,cam);
+document.getElementById("ld").remove();
+window.__ready=true;window.__parts={holes,patches};
+tick();
+</script>
+</body>
+</html>
