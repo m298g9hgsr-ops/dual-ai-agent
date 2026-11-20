@@ -230,6 +230,55 @@ body > * { position: relative; z-index: 1; }
   100% { stroke-dashoffset: 100; }
 }
 
+/* ============ 三輪成長圖 ============ */
+.growth-card { width: 100%; max-width: 1440px; padding: 32px 28px 24px; margin-top: 12px; }
+.growth-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 4px; }
+.growth-head h2 { font-size: clamp(20px, 3vw, 28px); font-weight: 700; }
+.growth-sub { font-size: 13px; color: var(--muted); }
+.growth-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 16px 0 4px; }
+.legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-2); }
+.legend-swatch { width: 22px; height: 3px; border-radius: 3px; flex: none; }
+.legend-swatch.red { background: #ff6b6b; box-shadow: 0 0 8px rgba(255, 107, 107, 0.65); }
+.legend-swatch.cyan { background: var(--cyan); box-shadow: 0 0 8px rgba(0, 240, 255, 0.65); }
+.legend-swatch.blue { background: var(--blue); box-shadow: 0 0 8px rgba(77, 124, 255, 0.65); }
+.growth-chart { width: 100%; height: auto; display: block; overflow: visible; }
+.growth-chart .grid-line { stroke: rgba(255, 255, 255, 0.08); stroke-width: 1; }
+.growth-chart .axis-text { fill: var(--muted); font-size: 11px; }
+.growth-chart .axis-text.y { text-anchor: end; }
+.growth-chart .axis-text.x { text-anchor: middle; }
+.growth-chart .series-line {
+  fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100;
+}
+.growth-chart .series-line.red { stroke: #ff6b6b; filter: drop-shadow(0 0 6px rgba(255, 107, 107, 0.55)); }
+.growth-chart .series-line.cyan { stroke: var(--cyan); filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.55)); }
+.growth-chart .series-line.blue { stroke: var(--blue); filter: drop-shadow(0 0 6px rgba(77, 124, 255, 0.55)); }
+.growth-chart .series-line.draw { animation: growth-draw 1.6s ease-out forwards; }
+@keyframes growth-draw {
+  to { stroke-dashoffset: 0; }
+}
+.growth-chart .series-dot { stroke: #0a0d16; stroke-width: 1.6; }
+.growth-chart .series-dot.red { fill: #ff6b6b; }
+.growth-chart .series-dot.cyan { fill: var(--cyan); }
+.growth-chart .series-dot.blue { fill: var(--blue); }
+.growth-chart .value-text { font-size: 11px; font-weight: 700; text-anchor: middle; }
+.growth-chart .value-text.red { fill: #ff9b9b; }
+.growth-chart .value-text.cyan { fill: #8df3ff; }
+.growth-chart .value-text.blue { fill: #a9bcff; }
+.growth-chart .dot-hit { fill: transparent; pointer-events: all; outline: none; }
+.growth-chart .dot-hit:focus-visible { fill: rgba(0, 240, 255, 0.07); }
+.growth-note { margin-top: 14px; font-size: 12px; color: #6f7b8c; line-height: 1.7; }
+.growth-note code { color: #8df3ff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.growth-note .demo-flag { color: #ffa24d; font-weight: 600; }
+@media (max-width: 720px) {
+  .growth-card { padding: 24px 16px 20px; }
+  .growth-legend { gap: 6px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .growth-chart .series-line { stroke-dashoffset: 0; }
+  .growth-chart .series-line.draw { animation: none; }
+}
+
 /* ============ 資料區 ============ */
 .data-section { width: 100%; max-width: 1440px; padding: 8px 4px 0; }
 .section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin: 32px 0 18px; }
@@ -346,6 +395,7 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
   .cell-links { flex-wrap: wrap; line-height: 2.2; }
   .section-head { margin: 24px 0 14px; }
   .clear-btn { margin-left: 0; }
+  .growth-card { padding: 24px 16px 20px; }
 }
 @media (max-width: 390px) {
   .card { border-radius: 22px; }
@@ -367,6 +417,9 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
   .needle { transform: rotate(var(--needle-end, 79.2deg)); }
   .gauge-arc { stroke-dashoffset: var(--gauge-end, 17); }
   .action-row, .action-row td, .clear-btn { transition: none; }
+  .growth-line { animation: none !important; stroke-dashoffset: 0; }
+  .growth-node { animation: none !important; opacity: 1; }
+  .growth-node .dot, .growth-guide { transition: none; }
 }
 </style>
 </head>
@@ -455,6 +508,21 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
       <div class="node-label">JUDGE 裁判<span class="node-sub" id="judge-dial-sub">轉盤評分</span></div>
     </div>
   </div>
+</section>
+
+<section class="card growth-card" aria-label="三輪成長折線圖">
+  <div class="growth-head">
+    <h2 class="gradient-text">三輪成長</h2>
+    <p class="growth-sub">攻 / 防 / 總 三條分數線，看每一回合的成長趨勢</p>
+  </div>
+  <div class="growth-legend" aria-hidden="true">
+    <span class="legend-item"><span class="legend-swatch red"></span>攻 attacker_score</span>
+    <span class="legend-item"><span class="legend-swatch cyan"></span>防 defender_score</span>
+    <span class="legend-item"><span class="legend-swatch blue"></span>總 score</span>
+  </div>
+  <svg class="growth-chart" id="growth-chart" viewBox="0 0 720 360" preserveAspectRatio="xMidYMid meet"
+       role="img" aria-label="三輪成長折線圖，載入中"></svg>
+  <p class="growth-note" id="growth-note">資料來源 <code>out/spar-juice/history.json</code>，載入中…</p>
 </section>
 
 <section class="data-section" aria-label="發現與防禦動作明細">
@@ -963,8 +1031,109 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
     applySelection();
   }
 
+  /* ===== 三輪成長：history.json → 折線圖 ===== */
+  var HISTORY_URLS = [
+    '../out/spar-juice/history.json',
+    '../../out/spar-juice/history.json',
+    'out/spar-juice/history.json',
+    '/out/spar-juice/history.json'
+  ];
+  var GROWTH_SERIES = [
+    { key: 'attacker', cls: 'red', label: '攻' },
+    { key: 'defender', cls: 'cyan', label: '防' },
+    { key: 'score', cls: 'blue', label: '總' }
+  ];
+
+  function loadGrowth() {
+    var index = 0;
+    function tryNext() {
+      if (index >= HISTORY_URLS.length) { return Promise.resolve(null); }
+      var url = HISTORY_URLS[index++];
+      return fetch(url).then(function (res) {
+        if (!res.ok) { throw new Error('HTTP ' + res.status); }
+        return res.json();
+      }).then(function (json) {
+        if (!Array.isArray(json) || !json.length) { throw new Error('history.json 不是非空陣列'); }
+        return json;
+      }).catch(tryNext);
+    }
+    return tryNext().then(function (json) {
+      renderGrowth(json || []);
+    }).catch(function (err) {
+      console.error('history.json 載入失敗：', err);
+      renderGrowth([]);
+    });
+  }
+
+  function renderGrowth(rows) {
+    var svg = document.getElementById('growth-chart');
+    var note = document.getElementById('growth-note');
+    if (!svg) { return; }
+    var data = (rows || []).filter(function (r) {
+      return r && isFinite(Number(r.score)) && isFinite(Number(r.attacker_score)) && isFinite(Number(r.defender_score));
+    }).map(function (r, i) {
+      return {
+        index: i + 1,
+        attacker: Math.max(0, Math.min(100, Number(r.attacker_score) || 0)),
+        defender: Math.max(0, Math.min(100, Number(r.defender_score) || 0)),
+        score: Math.max(0, Math.min(100, Number(r.score) || 0))
+      };
+    });
+
+    var W = 720, H = 360, padL = 46, padR = 26, padT = 36, padB = 44;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var n = data.length;
+
+    function xAt(i) { return n <= 1 ? padL + plotW / 2 : padL + plotW * i / (n - 1); }
+    function yAt(v) { return padT + plotH * (1 - v / 100); }
+
+    var parts = [];
+    [0, 25, 50, 75, 100].forEach(function (v) {
+      parts.push('<line class="grid-line" x1="' + padL + '" y1="' + yAt(v).toFixed(1) +
+        '" x2="' + (W - padR) + '" y2="' + yAt(v).toFixed(1) + '"/>');
+      parts.push('<text class="axis-text y" x="' + (padL - 10) + '" y="' + (yAt(v) + 4).toFixed(1) +
+        '" text-anchor="end">' + v + '</text>');
+    });
+    var labelStep = n <= 6 ? 1 : Math.ceil(n / 6);
+    data.forEach(function (r, i) {
+      if (i % labelStep !== 0 && i !== n - 1) { return; }
+      parts.push('<text class="axis-text x" x="' + xAt(i).toFixed(1) + '" y="' + (H - 16) +
+        '" text-anchor="middle">第' + r.index + '輪</text>');
+    });
+    GROWTH_SERIES.forEach(function (s) {
+      var d = data.map(function (r, i) {
+        return (i ? 'L' : 'M') + xAt(i).toFixed(1) + ' ' + yAt(r[s.key]).toFixed(1);
+      }).join(' ');
+      parts.push('<path class="series-line ' + s.cls + ' draw" pathLength="100" d="' + d + '"/>');
+    });
+    data.forEach(function (r, i) {
+      GROWTH_SERIES.forEach(function (s) {
+        parts.push('<circle class="series-dot ' + s.cls + '" cx="' + xAt(i).toFixed(1) + '" cy="' +
+          yAt(r[s.key]).toFixed(1) + '" r="4.5"/>');
+        if (n <= 8 || i % labelStep === 0 || i === n - 1) {
+          var ty = s.key === 'defender' ? yAt(r[s.key]) + 17 : yAt(r[s.key]) - 11;
+          parts.push('<text class="value-text ' + s.cls + '" x="' + xAt(i).toFixed(1) + '" y="' +
+            ty.toFixed(1) + '" text-anchor="middle">' + r[s.key] + '</text>');
+        }
+      });
+    });
+
+    svg.innerHTML = parts.join('');
+    if (note) {
+      note.innerHTML = '資料來源 <code>out/spar-juice/history.json</code> · 共 ' + n + ' 輪' +
+        (n ? ' · 最新一輪：攻 <b>' + data[n - 1].attacker + '</b> / 防 <b>' + data[n - 1].defender +
+          '</b> / 總 <b>' + data[n - 1].score + '</b>' : '（尚無資料）');
+    }
+    if (n) {
+      svg.setAttribute('aria-label', '三輪成長折線圖：共 ' + n + ' 輪，攻方從 ' + data[0].attacker +
+        ' 到 ' + data[n - 1].attacker + ' 分，防方從 ' + data[0].defender + ' 到 ' + data[n - 1].defender +
+        ' 分，總分從 ' + data[0].score + ' 到 ' + data[n - 1].score + ' 分。');
+    }
+  }
+
   function init() {
     bindEvents();
+    loadGrowth();
     loadData().then(function (json) {
       data = normalize(json);
       renderAll(data);

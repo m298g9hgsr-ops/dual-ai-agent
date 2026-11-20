@@ -11,6 +11,7 @@ import argparse
 import json
 import posixpath
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .models import Task
@@ -75,6 +76,28 @@ def write_output(root: Path, result) -> int:
     return written
 
 
+def _append_history(path: Path, record: dict) -> None:
+    """Append one SPAR summary record to the history JSON array."""
+    try:
+        history: list = []
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                data = None
+            if isinstance(data, list):
+                history = data
+        history.append(record)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(history, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"[written] {path.resolve()}")
+    except Exception as exc:
+        print(f"[warn] failed to append history: {exc}", file=sys.stderr)
+
+
 def spar_main(argv: list[str]) -> int:
     """Red/blue adversarial exercise: RED attacks, BLUE defends, JUDGE scores."""
     p = argparse.ArgumentParser(prog="dual-ai-agent spar")
@@ -93,6 +116,18 @@ def spar_main(argv: list[str]) -> int:
         objectives=args.objective or None,
         rounds=args.rounds,
         max_steps=args.max_steps,
+    )
+
+    history_path = Path(__file__).resolve().parents[1] / "out" / "spar-juice" / "history.json"
+    _append_history(
+        history_path,
+        {
+            "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "score": result.verdict.score,
+            "attacker_score": result.verdict.attacker_score,
+            "defender_score": result.verdict.defender_score,
+            "findings": [f.title for f in result.attack.findings],
+        },
     )
 
     print(f"\n=== SPAR · {result.target} ===")
