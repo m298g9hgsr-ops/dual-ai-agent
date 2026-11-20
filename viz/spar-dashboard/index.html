@@ -417,9 +417,6 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
   .needle { transform: rotate(var(--needle-end, 79.2deg)); }
   .gauge-arc { stroke-dashoffset: var(--gauge-end, 17); }
   .action-row, .action-row td, .clear-btn { transition: none; }
-  .growth-line { animation: none !important; stroke-dashoffset: 0; }
-  .growth-node { animation: none !important; opacity: 1; }
-  .growth-node .dot, .growth-guide { transition: none; }
 }
 </style>
 </head>
@@ -1044,6 +1041,13 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
     { key: 'score', cls: 'blue', label: '總' }
   ];
 
+  /* 內嵌示範資料（demo）：history.json 全部候選路徑都取不到時使用 */
+  var GROWTH_DEMO = [
+    { ts: 'demo-1', score: 62, attacker_score: 40, defender_score: 65, findings: [] },
+    { ts: 'demo-2', score: 74, attacker_score: 52, defender_score: 80, findings: [] },
+    { ts: 'demo-3', score: 81, attacker_score: 61, defender_score: 90, findings: [] }
+  ];
+
   function loadGrowth() {
     var index = 0;
     function tryNext() {
@@ -1058,14 +1062,14 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
       }).catch(tryNext);
     }
     return tryNext().then(function (json) {
-      renderGrowth(json || []);
+      renderGrowth(json || GROWTH_DEMO, !json);
     }).catch(function (err) {
       console.error('history.json 載入失敗：', err);
-      renderGrowth([]);
+      renderGrowth(GROWTH_DEMO, true);
     });
   }
 
-  function renderGrowth(rows) {
+  function renderGrowth(rows, isDemo) {
     var svg = document.getElementById('growth-chart');
     var note = document.getElementById('growth-note');
     if (!svg) { return; }
@@ -1110,17 +1114,39 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
       GROWTH_SERIES.forEach(function (s) {
         parts.push('<circle class="series-dot ' + s.cls + '" cx="' + xAt(i).toFixed(1) + '" cy="' +
           yAt(r[s.key]).toFixed(1) + '" r="4.5"/>');
-        if (n <= 8 || i % labelStep === 0 || i === n - 1) {
-          var ty = s.key === 'defender' ? yAt(r[s.key]) + 17 : yAt(r[s.key]) - 11;
-          parts.push('<text class="value-text ' + s.cls + '" x="' + xAt(i).toFixed(1) + '" y="' +
-            ty.toFixed(1) + '" text-anchor="middle">' + r[s.key] + '</text>');
-        }
       });
+    });
+    /* 數值標籤：同一輪內依分數由高到低排列，並強制至少 13px 垂直間距，避免文字重疊 */
+    data.forEach(function (r, i) {
+      if (n > 8 && i % labelStep !== 0 && i !== n - 1) { return; }
+      var ordered = GROWTH_SERIES.slice().sort(function (a, b) { return r[b.key] - r[a.key]; });
+      var lastY = -Infinity;
+      ordered.forEach(function (s) {
+        var ty = yAt(r[s.key]) - 11;
+        if (ty < lastY + 13) { ty = lastY + 13; }
+        lastY = ty;
+        parts.push('<text class="value-text ' + s.cls + '" x="' + xAt(i).toFixed(1) + '" y="' +
+          ty.toFixed(1) + '" text-anchor="middle">' + r[s.key] + '</text>');
+      });
+    });
+
+    /* 透明熱區：hover / 點擊 / 聚焦時播報該輪分數 */
+    var spacing = n > 1 ? plotW / (n - 1) : plotW;
+    data.forEach(function (r, i) {
+      var hx = xAt(i);
+      var rx = Math.max(padL, hx - spacing / 2);
+      var rw = Math.min(W - padR, hx + spacing / 2) - rx;
+      parts.push('<rect class="dot-hit" tabindex="0" role="button" aria-label="第 ' + r.index +
+        ' 輪，攻 ' + r.attacker + ' 分，防 ' + r.defender + ' 分，總 ' + r.score + ' 分" data-round="' +
+        r.index + '" data-red="' + r.attacker + '" data-cyan="' + r.defender + '" data-blue="' + r.score +
+        '" x="' + rx.toFixed(1) + '" y="' + padT + '" width="' + rw.toFixed(1) + '" height="' + plotH + '"/>');
     });
 
     svg.innerHTML = parts.join('');
     if (note) {
-      note.innerHTML = '資料來源 <code>out/spar-juice/history.json</code> · 共 ' + n + ' 輪' +
+      note.innerHTML = '資料來源 <code>out/spar-juice/history.json</code>' +
+        (isDemo ? ' · 目前為 <span class="demo-flag">示範資料 / demo</span>（history.json 未取到）' : '') +
+        ' · 共 ' + n + ' 輪' +
         (n ? ' · 最新一輪：攻 <b>' + data[n - 1].attacker + '</b> / 防 <b>' + data[n - 1].defender +
           '</b> / 總 <b>' + data[n - 1].score + '</b>' : '（尚無資料）');
     }
@@ -1129,6 +1155,20 @@ td { background: rgba(255, 255, 255, 0.03); font-size: 14px; color: var(--muted-
         ' 到 ' + data[n - 1].attacker + ' 分，防方從 ' + data[0].defender + ' 到 ' + data[n - 1].defender +
         ' 分，總分從 ' + data[0].score + ' 到 ' + data[n - 1].score + ' 分。');
     }
+    bindGrowthHover(svg);
+  }
+
+  function bindGrowthHover(svg) {
+    var hits = svg.querySelectorAll('.dot-hit');
+    Array.prototype.forEach.call(hits, function (hit) {
+      function report() {
+        announce('第 ' + hit.getAttribute('data-round') + ' 輪 · 攻 ' + hit.getAttribute('data-red') +
+          ' / 防 ' + hit.getAttribute('data-cyan') + ' / 總 ' + hit.getAttribute('data-blue'));
+      }
+      hit.addEventListener('mouseenter', report);
+      hit.addEventListener('click', report);
+      hit.addEventListener('focus', report);
+    });
   }
 
   function init() {
